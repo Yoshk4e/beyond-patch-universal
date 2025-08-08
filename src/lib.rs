@@ -9,42 +9,45 @@ use windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows::Win32::{Foundation::HINSTANCE, System::LibraryLoader::GetModuleFileNameA};
 use std::ffi::CStr;
 use std::path::Path;
+use std::thread::sleep;
+use std::time::Duration;
 
 mod interceptor;
 mod marshal;
 mod modules;
 mod util;
 
-use crate::modules::{Http, MhyContext, ModuleManager, Security};
+use crate::modules::{Http, MhyContext, ModuleManager};
 
 unsafe fn thread_func() {
+    Console::AllocConsole().unwrap();
     let mut module_manager = MODULE_MANAGER.write().unwrap();
-
-    // Block query_security_file ASAP
+    
     module_manager.enable(MhyContext::<CcpBlocker>::new(""));
 
     util::disable_memprotect_guard();
-    Console::AllocConsole().unwrap();
 
-    println!("Genshin Impact encryption patch\nMade by xeondev\n(Modded for all version > 5.0)");
+    println!("Endfield redirection patch\nMade by xeondev(base) & oureveryday(pattern scan idea)\n");
 
+    sleep(Duration::from_secs(10));
     let mut buffer = [0u8; 260];
     GetModuleFileNameA(None, &mut buffer);
     let exe_path = CStr::from_ptr(buffer.as_ptr() as *const i8).to_str().unwrap();
     let exe_name = Path::new(exe_path).file_name().unwrap().to_str().unwrap();
+    let dll = "GameAssembly.dll";
     println!("Current executable name: {}", exe_name);
 
-    if exe_name != "GenshinImpact.exe" && exe_name != "YuanShen.exe" {
-        println!("Executable is not Genshin. Skipping initialization.");
+    if exe_name != "Endfield_TBeta_OS.exe" && exe_name != "Endfield_TAlpha.exe" {
+        println!("Executable is not endfield. Skipping initialization.");
         return;
     }
 
     println!("Initializing modules...");
 
-    module_manager.enable(MhyContext::<Security>::new(&exe_name));
+    /*module_manager.enable(MhyContext::<Security>::new(&exe_name));*/
     marshal::find();
-    module_manager.enable(MhyContext::<Http>::new(&exe_name));
-    module_manager.enable(MhyContext::<Misc>::new(&exe_name));
+    module_manager.enable(MhyContext::<Http>::new(&dll));
+    module_manager.enable(MhyContext::<Misc>::new(&dll));
 
     println!("Successfully initialized!");
 }
@@ -57,15 +60,9 @@ lazy_static! {
 #[allow(non_snake_case)]
 unsafe extern "system" fn DllMain(_: HINSTANCE, call_reason: u32, _: *mut ()) -> bool {
     if call_reason == DLL_PROCESS_ATTACH {
-        #[cfg(debug_assertions)]
-        {
+        std::thread::spawn(|| {
             thread_func();
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            std::thread::spawn(|| thread_func());
-        }
+        });
     }
-
     true
 }

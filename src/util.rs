@@ -23,7 +23,7 @@ pub unsafe fn disable_memprotect_guard() {
         ntdll,
         PCSTR::from_raw(c"NtProtectVirtualMemory".to_bytes_with_nul().as_ptr()),
     )
-    .unwrap();
+        .unwrap();
 
     let routine = if is_wine() {
         GetProcAddress(ntdll, s!("NtPulseEvent")).unwrap()
@@ -38,7 +38,7 @@ pub unsafe fn disable_memprotect_guard() {
         PAGE_EXECUTE_READWRITE,
         &mut old_prot,
     )
-    .unwrap();
+        .unwrap();
 
     let routine_val = *(routine as *const usize);
 
@@ -58,7 +58,7 @@ pub unsafe fn disable_memprotect_guard() {
         old_prot,
         &mut old_prot,
     )
-    .unwrap();
+        .unwrap();
 }
 
 unsafe fn is_wine() -> bool {
@@ -68,12 +68,12 @@ unsafe fn is_wine() -> bool {
 
 pub unsafe fn pattern_scan_code(module: &str, pattern: &str) -> Option<*mut u8> {
     let w_module_name = wide_str(module);
-    
+
     let module_handle = match GetModuleHandleW(PCWSTR::from_raw(w_module_name.as_ptr())) {
         Ok(module) => Some(module.0 as usize),
         Err(_) => panic!("Failed to get module handle"),
     };
-    
+
     let module_handle_addr = module_handle.unwrap();
     let mod_base = module_handle_addr as *const u8;
     let dos_header = unsafe { &*(mod_base as *const IMAGE_DOS_HEADER) };
@@ -83,7 +83,7 @@ pub unsafe fn pattern_scan_code(module: &str, pattern: &str) -> Option<*mut u8> 
     let text_section_offset = mod_base.offset(text_section as isize);
     let text_slice: &[u8] = unsafe { slice::from_raw_parts(text_section_offset, size_of_text) };
     let mut cursor = Cursor::new(text_slice);
-     
+
     let loc = scan_first_match(&mut cursor, pattern.replace("??", "?").as_str()).unwrap();
     match loc {
         None => None,
@@ -93,17 +93,17 @@ pub unsafe fn pattern_scan_code(module: &str, pattern: &str) -> Option<*mut u8> 
 
 pub unsafe fn pattern_scan_il2cpp(module: &str, pattern: &str) -> Option<*mut u8> {
     let w_module_name = wide_str(module);
-    
+
     let module_handle = match GetModuleHandleW(PCWSTR::from_raw(w_module_name.as_ptr())) {
         Ok(module) => Some(module.0 as usize),
         Err(_) => panic!("Failed to get module handle"),
     };
-    
+
     let module_handle_addr = module_handle.unwrap();
     let mod_base = module_handle_addr as *const u8;
     let dos_header = unsafe { &*(mod_base as *const IMAGE_DOS_HEADER) };
     let nt_headers = unsafe { &*((mod_base.offset(dos_header.e_lfanew as isize)) as *const IMAGE_NT_HEADERS) };
-    
+
     let section_headers = unsafe {
         std::slice::from_raw_parts(
             (mod_base.offset(dos_header.e_lfanew as isize) as *const u8).offset(std::mem::size_of::<IMAGE_NT_HEADERS>() as isize) as *const IMAGE_SECTION_HEADER,
@@ -111,20 +111,20 @@ pub unsafe fn pattern_scan_il2cpp(module: &str, pattern: &str) -> Option<*mut u8
         )
     };
     let il2cpp_section = section_headers.iter().find(|section| {
-    let name = std::ffi::CStr::from_ptr(section.Name.as_ptr() as *const i8).to_str().unwrap_or("");
+        let name = std::ffi::CStr::from_ptr(section.Name.as_ptr() as *const i8).to_str().unwrap_or("");
         name == "il2cpp"
     });
-    
+
     if il2cpp_section.is_none() {
         println!("Failed to find il2cpp section");
         return None;
     }
-    
+
     let il2cpp_base = mod_base.offset(il2cpp_section.unwrap().VirtualAddress as isize);
     let il2cpp_size = il2cpp_section.unwrap().SizeOfRawData as usize;
     let il2cpp_slice: &[u8] = unsafe { slice::from_raw_parts(il2cpp_base, il2cpp_size) };
     let mut cursor = Cursor::new(il2cpp_slice);
-     
+
     let loc = scan_first_match(&mut cursor, pattern.replace("??", "?").as_str()).unwrap();
     match loc {
         None => None,
