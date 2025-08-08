@@ -1,101 +1,135 @@
-use std::ffi::CString;
+/*use std::{ffi::CString, thread, time::Duration};
+use winapi::shared::minwindef::HMODULE;
+use winapi::um::libloaderapi::GetModuleHandleA;
 
-use crate::marshal;
 
-use super::{MhyContext, MhyModule, ModuleType};
-use anyhow::Result;
 use ilhook::x64::Registers;
-use crate::util;
 
-const MHYRSA_PERFORM_CRYPTO_ACTION: &str = "E8 ?? ?? ?? ?? 66 C7 06 30 82";
-const KEY_SIGN_CHECK: &str = "89 DA ?? ?? ?? ?? ?? ?? E8 ?? ?? ?? ?? 89 C3 48 8B 4C 24 ?? 48 31 E1 E8 ?? ?? ?? ?? 89 D8 48 83 C4 ??";
-const KEY_SIGN_CHECK_OFFSET: usize = 0x22;
-const SDK_UTIL_RSA_ENCRYPT: &str = "41 57 41 56 41 55 41 54 56 57 55 53 48 83 EC ?? 49 89 D6 48 89 CE 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 49 89 C5";
+use crate::{
+    interceptor::Interceptor,
+    util::{import},
+};
 
-const KEY_SIZE: usize = 268;
-static SERVER_PUBLIC_KEY: &[u8] = include_bytes!("../../server_public_key.bin");
-static SDK_PUBLIC_KEY: &str = include_str!("../../sdk_public_key.xml");
+import!(rsa_create() -> usize = 0x43437A0);
+import!(rsa_from_xml_string(instance: usize, xml_string: usize) -> usize = 0x4343980);
+import!(il2cpp_string_new(cstr: *const u8) -> usize = 0x6E7750);
 
-pub struct Security;
+pub unsafe fn initialize_rsa_public_key() {
+    const SERVER_PUBLIC_KEY: &str = include_str!("../../sdk_public_key.xml");
 
-impl MhyModule for MhyContext<Security> {
-    unsafe fn init(&mut self) -> Result<()> {
+   
+    thread::spawn(|| {
+        
+        let name: *const i8 = b"GameAssembly.dll\0".as_ptr() as *const i8;
 
-        let mhyrsa_perform_crypto_action = util::pattern_scan_code(self.assembly_name, MHYRSA_PERFORM_CRYPTO_ACTION);
-        if let Some(addr) = mhyrsa_perform_crypto_action {
-            println!("mhyrsa_perform_crypto_action: {:x}", addr as usize);
-            self.interceptor.attach(
-                addr as usize,
-                on_mhy_rsa,
-            )?;
+        // Poll until the module is loaded
+        let base = loop {
+            let hmod: HMODULE = unsafe { GetModuleHandleA(name) };
+            if !hmod.is_null() {
+                break hmod as usize;
+            }
+            thread::sleep(Duration::from_millis(100));
+        };
+
+        
+        unsafe {
+            // Compute the slot address
+            let slot = (base.wrapping_add(0x6E3C090) as *mut usize);
+
+            // Build the RSA object from your XML
+            let rsa = rsa_create();
+            rsa_from_xml_string(
+                rsa,
+                il2cpp_string_new(
+                    CString::new(SERVER_PUBLIC_KEY)
+                        .unwrap()
+                        .to_bytes_with_nul()
+                        .as_ptr(),
+                ),
+            );
+
+            // Overwrite the backdoor pointer
+            *slot = rsa;
         }
-        else
-        {
-            println!("Failed to find mhyrsa_perform_crypto_action");
-        }
+    });
+}*/
 
-        let key_sign_check = util::pattern_scan_code(self.assembly_name, KEY_SIGN_CHECK);
-        if let Some(addr) = key_sign_check {
-            let addr_offset = addr as usize + KEY_SIGN_CHECK_OFFSET;
-            println!("key_sign_check: {:x}", addr_offset as usize);
-            self.interceptor.attach(
-                addr_offset as usize,
-                after_key_sign_check,
-            )?;
-        }
-        else
-        {
-            println!("Failed to find key_sign_check");
-        }
+/*pub unsafe fn replace_sdk_public_key_string_literal() {
+    const SDK_PUBLIC_KEY: &str = include_str!("../../sdk_public_key.xml");
 
+    *(GAME_ASSEMBLY_BASE.wrapping_add(0x5952CA8) as *mut usize) = il2cpp_string_new(
+        CString::new(SDK_PUBLIC_KEY)
+            .unwrap()
+            .to_bytes_with_nul()
+            .as_ptr(),
+    ) as usize;
 
-        let sdk_util_rsa_encrypt = util::pattern_scan_il2cpp(self.assembly_name, SDK_UTIL_RSA_ENCRYPT);
-        if let Some(addr) = sdk_util_rsa_encrypt {
-            println!("sdk_util_rsa_encrypt: {:x}", addr as usize);
-            self.interceptor.attach(
-                addr as usize,
-                on_sdk_util_rsa_encrypt,
-            )?;
-        }
-        else
-        {
-            println!("Failed to find sdk_util_rsa_encrypt");
-        }
+    *(GAME_ASSEMBLY_BASE.wrapping_add(0x59760D0) as *mut usize) = il2cpp_string_new(
+        [
+            27818, 40348, 47410, 27936, 51394, 33172, 51987, 8709, 44748, 23705, 45753, 21092,
+            57054, 52661, 369, 62630, 11725, 7496, 36921, 28271, 34880, 52645, 31515, 18214, 3108,
+            2077, 13490, 25459, 58590, 47504, 15163, 8951, 44748, 23705, 45753, 29284, 57054,
+            52661, 43266, 17556, 17415, 52254, 32830,
+        ]
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, v)| {
+                let b = (((i + ((i >> 31) >> 29)) & 0xF8).wrapping_sub(i)) as i16;
+                (((v << ((b + 11) & 0xF)) | (v >> ((-11 - b) & 0xF))) & 0xFFFF_u16)
+                    .to_be_bytes()
+                    .into_iter()
+            })
+            .chain([0])
+            .collect::<Vec<_>>()
+            .as_ptr(),
+    ) as usize;
+}
 
-        Ok(())
-    }
+pub unsafe fn monitor_network_state(interceptor: &mut Interceptor) {
+    interceptor
+        .attach(
+            GAME_ASSEMBLY_BASE.wrapping_add(0xDE28090),
+            on_network_state_change,
+        )
+        .unwrap();
+}
 
-    unsafe fn de_init(&mut self) -> Result<()> {
-        Ok(())
-    }
+unsafe extern "win64" fn on_network_state_change(reg: *mut Registers, _: usize) {
+    let net_state = NetworkState::from((*reg).rcx);
+    println!("network state change: {net_state:?}");
 
-    fn get_module_type(&self) -> super::ModuleType {
-        ModuleType::Security
+    if net_state == NetworkState::PlayerLoginCsReq {
+        // public key rsa gets reset to null after successful PlayerGetTokenScRsp
+        initialize_rsa_public_key();
     }
 }
 
-unsafe extern "win64" fn after_key_sign_check(reg: *mut Registers, _: usize) {
-    println!("key sign check!");
-    (*reg).rax = 1
-}
-
-unsafe extern "win64" fn on_mhy_rsa(reg: *mut Registers, _: usize) {
-    println!("key: {:X}", *((*reg).r12 as *const u64));
-    println!("len: {:X}", (*reg).r8 -3);
-
-    if ((*reg).r8 as usize) - 3 == KEY_SIZE {
-        println!("[*] key replaced");
-
-        std::ptr::copy_nonoverlapping(
-            SERVER_PUBLIC_KEY.as_ptr(),
-            (*reg).r12 as *mut u8,
-            SERVER_PUBLIC_KEY.len(),
-        );
-    }
-}
-
-unsafe extern "win64" fn on_sdk_util_rsa_encrypt(reg: *mut Registers, _: usize) {
-    println!("[*] SDK RSA: key replaced");
-    (*reg).rcx =
-        marshal::ptr_to_string_ansi(CString::new(SDK_PUBLIC_KEY).unwrap().as_c_str()) as u64;
-}
+#[repr(u64)]
+#[derive(num_enum::FromPrimitive, Debug, Default, PartialEq)]
+pub enum NetworkState {
+    CloudCmdLine = 1021,
+    CloudDispatch = 1020,
+    StartBasicsReq = 17,
+    LoadShaderEnd = 9,
+    PlayerLoginCsReq = 15,
+    EndBasicsReq = 18,
+    LoadResourcesEnd = 10,
+    GlobalDispatch = 1,
+    ConnectGameServer = 12,
+    ChooseServer = 2,
+    DoFileVerifyEnd = 7,
+    PlayerLoginScRsp = 16,
+    DispatchResult = 4,
+    PlayerGetTokenScRsp = 14,
+    DownloadResourcesEnd = 6,
+    AccountLogin = 3,
+    LoadAssetEnd = 8,
+    StartEnterGameWorld = 11,
+    #[default]
+    None = 0,
+    EnterWorldScRsp = 19,
+    PlayerGetTokenCsReq = 13,
+    StartDownLoad = 5,
+    DoFileVerifyFailed = 1022,
+    CleanExpireEnd = 1023,
+}*/

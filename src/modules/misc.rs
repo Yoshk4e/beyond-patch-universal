@@ -2,24 +2,27 @@ use super::{MhyContext, MhyModule, ModuleType};
 use anyhow::Result;
 use ilhook::x64::Registers;
 use crate::util;
+
 pub struct Misc;
 
-const SET_CUSTOM_PROPERTY_FLOAT: &str = "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC ?? 0F 29 74 24 ?? 0F 28 F2 41 0F B6 F9 8B F2 48 8B D9 48 85 C9 74 ?? E8 ?? ?? ?? ?? 48 85 C0 74 ?? 40 84 FF 0F 28 D6 8B D6 48 8B C8 41 0F 95 C1 48 8B 5C 24 ?? 48 8B 74 24 ?? 0F 28 74 24 ?? 48 83 C4 ?? 5F E9 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ?? CC 48 89 5C 24 ??";
+
+const SET_FLOAT_ARRAY_SIG: &str = "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 80 3D ? ? ? ? ? 41 8B F9 49 8B D8 8B F2 48 8B E9 75 ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 8D 0D ? ? ? ? E8 ? ? ? ? C6 05 ? ? ? ? ? 48 8B 15 ? ? ? ? 48 8B CB E8 ? ? ? ? 84 C0 0F 84 ? ? ? ? 83 7B ? ? 0F 84 ? ? ? ? 39 7B ? 0F 8C ? ? ? ? 0F 10 03 48 8B 15 ? ? ? ? 48 8D 4C 24 ? 0F 29 44 24 ? E8 ? ? ? ? 48 8B 0D ? ? ? ? 48 8B D8 83 B9 ? ? ? ? ? 75 ? E8 ? ? ? ? 33 D2 48 8B CB E8 ? ? ? ? 48 8B D8 48 8B 05 ? ? ? ? 48 85 C0 75 ? 48 8D 0D ? ? ? ? E8 ? ? ? ? 48 89 05 ? ? ? ? 4C 8B CB 89 7C 24 ? 45 33 C0";
+// Offset from SetFloatArray to SetFloat(int, float)
+const SET_FLOAT_OFFSET: usize = 0x200;
 
 impl MhyModule for MhyContext<Misc> {
     unsafe fn init(&mut self) -> Result<()> {
         // Dither
-        let set_custom_property_float = util::pattern_scan_code(self.assembly_name, SET_CUSTOM_PROPERTY_FLOAT);
-        if let Some(addr) = set_custom_property_float {
-            println!("set_custom_property_float: {:x}", addr as usize);
+        let set_float_array_addr = util::pattern_scan_code(self.assembly_name, SET_FLOAT_ARRAY_SIG);
+        if let Some(addr) = set_float_array_addr {
+            let target_addr = addr as usize + SET_FLOAT_OFFSET;
+            println!("set_float_target: {:x}", target_addr);
             self.interceptor.replace(
-                addr as usize,
-                set_custom_property_float_replacement,
+                target_addr,
+                set_float_replacement,
             )?;
-        }
-        else
-        {
-            println!("Failed to find set_custom_property_float");
+        } else {
+            println!("Failed to find set_float_array");
         }
 
         Ok(())
@@ -34,7 +37,8 @@ impl MhyModule for MhyContext<Misc> {
     }
 }
 
-unsafe extern "win64" fn set_custom_property_float_replacement(
+
+unsafe extern "win64" fn set_float_replacement(
     _: *mut Registers,
     _: usize,
     _: usize,

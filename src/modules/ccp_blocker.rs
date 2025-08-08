@@ -32,7 +32,7 @@ unsafe extern "win64" fn on_getaddrinfo(reg: *mut Registers, _: usize) {
     let host_ptr = (*reg).rcx as *const i8;
     let host = CStr::from_ptr(host_ptr).to_string_lossy();
 
-    if host == "dispatchosglobal.yuanshen.com" || host == "dispatchcnglobal.yuanshen.com" {
+    if host == "game-config.gryphline.com" || host == "as-stable.gryphline.com" {
         std::ptr::copy_nonoverlapping(c"0.0.0.0".as_ptr(), (*reg).rcx as *mut i8, 9);
     }
 }
