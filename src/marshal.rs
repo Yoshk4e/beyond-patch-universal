@@ -1,10 +1,8 @@
 use std::ffi::CStr;
 use crate::util;
-
-use windows::Win32::{System::LibraryLoader::GetModuleFileNameA};
-use std::path::Path;
 use windows::core::s;
 use windows::Win32::System::LibraryLoader::GetModuleHandleA;
+use tracing::Level;
 
 const PTR_TO_STRING_ANSI: &str = "40 53 48 83 EC ? 80 3D ? ? ? ? ? 48 8B D9 75 ? 48 8D 0D ? ? ? ? E8 ? ? ? ? C6 05 ? ? ? ? ? 48 8B 0D ? ? ? ? 83 B9 ? ? ? ? ? 75 ? E8 ? ? ? ? 48 8B CB E8";
 const PTR_TO_STRING_ANSI_OFFSET: usize = 0x140;
@@ -25,9 +23,9 @@ pub unsafe fn find() {
     if let Some(addr) = ptr_to_string_ansi {
         let addr_offset = addr as usize + PTR_TO_STRING_ANSI_OFFSET;
         PTR_TO_STRING_ANSI_ADDR = Some(addr_offset);
-        println!("ptr_to_string_ansi: {:x}", addr_offset);
+        tracing::debug!("ptr_to_string_ansi: {:x}", addr_offset);
     } else {
-        println!("Failed to find ptr_to_string_ansi");
+        tracing::warn!("Failed to find ptr_to_string_ansi");
     }
 }
 
