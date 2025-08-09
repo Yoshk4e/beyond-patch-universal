@@ -1,3 +1,4 @@
+// Edited main.rs
 #![feature(str_from_utf16_endian)]
 
 use std::{sync::RwLock};
@@ -22,8 +23,6 @@ use crate::modules::{Http, MhyContext, ModuleManager};
 unsafe fn thread_func() {
     Console::AllocConsole().unwrap();
     let mut module_manager = MODULE_MANAGER.write().unwrap();
-    
-    module_manager.enable(MhyContext::<CcpBlocker>::new(""));
 
     util::disable_memprotect_guard();
 
@@ -42,12 +41,14 @@ unsafe fn thread_func() {
         return;
     }
 
+    module_manager.enable(MhyContext::<CcpBlocker>::new("", exe_name.to_string()));
+
     println!("Initializing modules...");
 
-    /*module_manager.enable(MhyContext::<Security>::new(&exe_name));*/
+    /*module_manager.enable(MhyContext::<Security>::new(exe_name.to_string()));*/
     marshal::find();
-    module_manager.enable(MhyContext::<Http>::new(&dll));
-    module_manager.enable(MhyContext::<Misc>::new(&dll));
+    module_manager.enable(MhyContext::<Http>::new(&dll, exe_name.to_string()));
+    module_manager.enable(MhyContext::<Misc>::new(&dll, exe_name.to_string()));
 
     println!("Successfully initialized!");
 }
