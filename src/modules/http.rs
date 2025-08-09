@@ -1,11 +1,10 @@
-// Edited http.rs
 use std::ffi::CString;
-
 use super::{MhyContext, MhyModule, ModuleType};
 use crate::marshal;
 use anyhow::Result;
 use ilhook::x64::Registers;
 use crate::util;
+use  tracing::Level;
 
 const ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 83 EC ? 48 8B DA 48 8B F9 80 3D ? ? ? ? ? 75";
 const BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 81 EC ? ? ? ? 48 8B DA 48 8B F9";
@@ -28,7 +27,7 @@ impl MhyModule for MhyContext<Http> {
         let web_request_utils_make_initial_url = util::pattern_scan_code(self.assembly_name, sig);
         if let Some(addr) = web_request_utils_make_initial_url {
             let target_addr = addr as usize + offset;
-            println!("web_request_utils_make_initial_url: {:x}", target_addr);
+            tracing::debug!("web_request_utils_make_initial_url: {:x}", target_addr);
             self.interceptor.attach(
                 target_addr,
                 on_make_initial_url,
@@ -36,7 +35,7 @@ impl MhyModule for MhyContext<Http> {
         }
         else
         {
-            println!("Failed to find web_request_utils_make_initial_url");
+            tracing::warn!("Failed to find web_request_utils_make_initial_url");
         }
 
         /*let is_beta = self.exe_name == "Endfield_TBeta_OS.exe";
@@ -45,7 +44,7 @@ impl MhyModule for MhyContext<Http> {
         let browser_load_url = util::pattern_scan_il2cpp(self.assembly_name, sig);
         if let Some(addr) = browser_load_url {
             let target_addr = addr as usize + offset;
-            println!("browser_load_url: {:x}", target_addr);
+            tracing::debug!("browser_load_url: {:x}", target_addr);
             self.interceptor.attach(
                 target_addr,
                 on_browser_load_url,
@@ -53,7 +52,7 @@ impl MhyModule for MhyContext<Http> {
         }
         else
         {
-            println!("Failed to find browser_load_url");
+            tracing::warn!("Failed to find browser_load_url");
         }*/
 
         Ok(())
@@ -70,7 +69,7 @@ impl MhyModule for MhyContext<Http> {
 
 unsafe extern "win64" fn on_make_initial_url(reg: *mut Registers, _: usize) {
     if (*reg).rcx == 0 {
-        println!("MakeInitialUrl: rcx is null, skipping");
+        tracing::error!("MakeInitialUrl: rcx is null, skipping");
         return;
     }
 
@@ -78,7 +77,7 @@ unsafe extern "win64" fn on_make_initial_url(reg: *mut Registers, _: usize) {
     let str_ptr = (*reg).rcx.wrapping_add(20) as *const u8;
 
     if str_length == 0 || str_ptr.is_null() {
-        println!("MakeInitialUrl: Invalid string length or pointer, skipping");
+        tracing::warn!("MakeInitialUrl: Invalid string length or pointer, skipping");
         return;
     }
 
@@ -86,12 +85,12 @@ unsafe extern "win64" fn on_make_initial_url(reg: *mut Registers, _: usize) {
     let url = match String::from_utf16le(slice) {
         Ok(url) => url,
         Err(e) => {
-            println!("MakeInitialUrl: UTF-16 conversion failed: {:?}", e);
+            tracing::warn!("MakeInitialUrl: UTF-16 conversion failed: {:?}", e);
             return;
         }
     };
 
-    println!("MakeInitialUrl: Original URL: {}", url);
+    tracing::debug!("MakeInitialUrl: Original URL: {}", url);
 
     if !url.contains("/token_by_channel_token") && !url.contains("platform=Windows") && !url.contains("res_version") && !url.contains("asset") && !url.contains("StreamingAssets") {
         let mut new_url = if url.contains("/remote_config") || url.contains("/get_server_list") {
@@ -105,20 +104,20 @@ unsafe extern "win64" fn on_make_initial_url(reg: *mut Registers, _: usize) {
             new_url.push_str(s);
         });
 
-        println!("MakeInitialUrl Redirect: {} -> {}", url, new_url);
+        tracing::debug!("MakeInitialUrl Redirect: {} -> {}", url, new_url);
 
         match CString::new(new_url.as_str()) {
             Ok(cstring) => (*reg).rcx = marshal::ptr_to_string_ansi(cstring.as_c_str()) as u64,
-            Err(e) => println!("MakeInitialUrl: Failed to create CString: {:?}", e),
+            Err(e) => tracing::error!("MakeInitialUrl: Failed to create CString: {:?}", e),
         }
     } else {
-        println!("MakeInitialUrl: Skipping redirection");
+        tracing::info!("MakeInitialUrl: Skipping redirection");
     }
 }
 
 unsafe extern "win64" fn on_browser_load_url(reg: *mut Registers, _: usize) {
     if (*reg).rdx == 0 {
-        println!("Browser::LoadURL: rdx is null, skipping");
+        tracing::error!("Browser::LoadURL: rdx is null, skipping");
         return;
     }
 
@@ -126,7 +125,7 @@ unsafe extern "win64" fn on_browser_load_url(reg: *mut Registers, _: usize) {
     let str_ptr = (*reg).rdx.wrapping_add(20) as *const u8;
 
     if str_length == 0 || str_ptr.is_null() {
-        println!("Browser::LoadURL: Invalid string length or pointer, skipping");
+        tracing::error!("Browser::LoadURL: Invalid string length or pointer, skipping");
         return;
     }
 
@@ -134,12 +133,12 @@ unsafe extern "win64" fn on_browser_load_url(reg: *mut Registers, _: usize) {
     let url = match String::from_utf16le(slice) {
         Ok(url) => url,
         Err(e) => {
-            println!("Browser::LoadURL: UTF-16 conversion failed: {:?}", e);
+            tracing::warn!("Browser::LoadURL: UTF-16 conversion failed: {:?}", e);
             return;
         }
     };
 
-    println!("Browser::LoadURL: Original URL: {}", url);
+    tracing::debug!("Browser::LoadURL: Original URL: {}", url);
 
     let mut new_url = String::from("http://127.0.0.1:21000");
     url.split('/').skip(3).for_each(|s| {
@@ -147,10 +146,10 @@ unsafe extern "win64" fn on_browser_load_url(reg: *mut Registers, _: usize) {
         new_url.push_str(s);
     });
 
-    println!("Browser::LoadURL: {} -> {}", url, new_url);
+    tracing::debug!("Browser::LoadURL: {} -> {}", url, new_url);
 
     match CString::new(new_url.as_str()) {
         Ok(cstring) => (*reg).rdx = marshal::ptr_to_string_ansi(cstring.as_c_str()) as u64,
-        Err(e) => println!("Browser::LoadURL: Failed to create CString: {:?}", e),
+        Err(e) => tracing::error!("Browser::LoadURL: Failed to create CString: {:?}", e),
     }
 }

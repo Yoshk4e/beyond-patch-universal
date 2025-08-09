@@ -1,4 +1,3 @@
-// Edited misc.rs
 use super::{MhyContext, MhyModule, ModuleType};
 use anyhow::Result;
 use ilhook::x64::Registers;
@@ -20,13 +19,13 @@ impl MhyModule for MhyContext<Misc> {
         let set_float_array_addr = util::pattern_scan_code(self.assembly_name, sig);
         if let Some(addr) = set_float_array_addr {
             let target_addr = addr as usize + offset;
-            println!("set_float_target: {:x}", target_addr);
+            tracing::debug!("set_float_target: {:x}", target_addr);
             self.interceptor.replace(
                 target_addr,
                 set_float_replacement,
             )?;
         } else {
-            println!("Failed to find set_float_array");
+            tracing::error!("Failed to find set_float_array");
         }
 
         Ok(())
