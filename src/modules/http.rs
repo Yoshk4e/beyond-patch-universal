@@ -1,3 +1,4 @@
+// Edited http.rs
 use std::ffi::CString;
 
 use super::{MhyContext, MhyModule, ModuleType};
@@ -6,20 +7,30 @@ use anyhow::Result;
 use ilhook::x64::Registers;
 use crate::util;
 
-const WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 83 EC ? 48 8B DA 48 8B F9 80 3D ? ? ? ? ? 75";
-/*const BROWSER_LOAD_URL: &str = "41 B0 01 E9 08 00 00 00 0F 1F 84 00 00 00 00 00 56 57";
-const BROWSER_LOAD_URL_OFFSET: usize = 0x10;*/
+const ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 83 EC ? 48 8B DA 48 8B F9 80 3D ? ? ? ? ? 75";
+const BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 81 EC ? ? ? ? 48 8B DA 48 8B F9";
+const ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET: usize = 0;
+const BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET: usize = 0;
+
+/*const ALPHA_BROWSER_LOAD_URL: &str = "";
+const BETA_BROWSER_LOAD_URL: &str = "";
+const ALPHA_BROWSER_LOAD_URL_OFFSET: usize = 0;
+const BETA_BROWSER_LOAD_URL_OFFSET: usize = 0;*/
 
 pub struct Http;
 
 impl MhyModule for MhyContext<Http> {
     unsafe fn init(&mut self) -> Result<()> {
 
-        let web_request_utils_make_initial_url = util::pattern_scan_code(self.assembly_name, WEB_REQUEST_UTILS_MAKE_INITIAL_URL);
+        let is_beta = self.exe_name == "Endfield_TBeta_OS.exe";
+        let sig = if is_beta { BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL } else { ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL };
+        let offset = if is_beta { BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET } else { ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET };
+        let web_request_utils_make_initial_url = util::pattern_scan_code(self.assembly_name, sig);
         if let Some(addr) = web_request_utils_make_initial_url {
-            println!("web_request_utils_make_initial_url: {:x}", addr as usize);
+            let target_addr = addr as usize + offset;
+            println!("web_request_utils_make_initial_url: {:x}", target_addr);
             self.interceptor.attach(
-                addr as usize,
+                target_addr,
                 on_make_initial_url,
             )?;
         }
@@ -28,16 +39,19 @@ impl MhyModule for MhyContext<Http> {
             println!("Failed to find web_request_utils_make_initial_url");
         }
 
-        /*let browser_load_url = util::pattern_scan_il2cpp(self.assembly_name, BROWSER_LOAD_URL);
+        /*let is_beta = self.exe_name == "Endfield_TBeta_OS.exe";
+        let sig = if is_beta { BETA_BROWSER_LOAD_URL } else { ALPHA_BROWSER_LOAD_URL };
+        let offset = if is_beta { BETA_BROWSER_LOAD_URL_OFFSET } else { ALPHA_BROWSER_LOAD_URL_OFFSET };
+        let browser_load_url = util::pattern_scan_il2cpp(self.assembly_name, sig);
         if let Some(addr) = browser_load_url {
-            let addr_offset = addr as usize + BROWSER_LOAD_URL_OFFSET;
-            println!("browser_load_url: {:x}", addr_offset);
+            let target_addr = addr as usize + offset;
+            println!("browser_load_url: {:x}", target_addr);
             self.interceptor.attach(
-                addr_offset,
+                target_addr,
                 on_browser_load_url,
             )?;
-        }*/
-        /*else
+        }
+        else
         {
             println!("Failed to find browser_load_url");
         }*/

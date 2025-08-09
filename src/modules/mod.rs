@@ -54,14 +54,16 @@ pub trait MhyModule {
 
 pub struct MhyContext<T> {
     pub assembly_name: &'static str,
+    pub exe_name: String,
     pub interceptor: Interceptor,
     _phantom: std::marker::PhantomData<T>,
 }
 
 impl<T> MhyContext<T> {
-    pub const fn new(assembly_name: &'static str) -> Self {
+    pub fn new(assembly_name: &'static str, exe_name: String) -> Self {
         Self {
             assembly_name,
+            exe_name,
             interceptor: Interceptor::new(),
             _phantom: std::marker::PhantomData,
         }
