@@ -1,155 +1,87 @@
-use std::ffi::CString;
-use super::{MhyContext, MhyModule, ModuleType};
-use crate::marshal;
+use std::ffi::c_void;
+
+use super::{HgContext, HgModule};
+use crate::il2cpp::{self, Il2CppString};
 use anyhow::Result;
 use ilhook::x64::Registers;
-use crate::util;
-use  tracing::Level;
 
-const ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 83 EC ? 48 8B DA 48 8B F9 80 3D ? ? ? ? ? 75";
-const BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL: &str = "48 89 5C 24 ? 48 89 74 24 ? 48 89 4C 24 ? 57 41 56 41 57 48 81 EC ? ? ? ? 48 8B DA 48 8B F9";
-const ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET: usize = 0;
-const BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET: usize = 0;
+type MakeInitialUrl =
+    unsafe extern "C" fn(*mut Il2CppString, *mut Il2CppString) -> *mut Il2CppString;
+type UwrInternalSetUrl = unsafe extern "C" fn(*mut c_void, *mut Il2CppString);
 
-/*const ALPHA_BROWSER_LOAD_URL: &str = "";
-const BETA_BROWSER_LOAD_URL: &str = "";
-const ALPHA_BROWSER_LOAD_URL_OFFSET: usize = 0;
-const BETA_BROWSER_LOAD_URL_OFFSET: usize = 0;*/
+static mut MAKE_INITIAL_URL: Option<MakeInitialUrl> = None;
+static mut UWR_INTERNAL_SET_URL: Option<UwrInternalSetUrl> = None;
+
+const PORT: u16 = 21000;
+const DISPATCH_PORT: u16 = 21041;
 
 pub struct Http;
 
-impl MhyModule for MhyContext<Http> {
+impl HgModule for HgContext<Http> {
     unsafe fn init(&mut self) -> Result<()> {
+        unsafe {
+            let domain = il2cpp::domain_get();
+            let uwr_img =
+                (*(*domain).assembly_open("UnityEngine.UnityWebRequestModule.dll")).get_image();
 
-        let is_beta = self.exe_name == "Endfield_TBeta_OS.exe";
-        let sig = if is_beta { BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL } else { ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL };
-        let offset = if is_beta { BETA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET } else { ALPHA_WEB_REQUEST_UTILS_MAKE_INITIAL_URL_OFFSET };
-        let web_request_utils_make_initial_url = util::pattern_scan_code(self.assembly_name, sig);
-        if let Some(addr) = web_request_utils_make_initial_url {
-            let target_addr = addr as usize + offset;
-            tracing::debug!("web_request_utils_make_initial_url: {:x}", target_addr);
-            self.interceptor.attach(
-                target_addr,
-                on_make_initial_url,
-            )?;
-        }
-        else
-        {
-            tracing::warn!("Failed to find web_request_utils_make_initial_url");
-        }
+            let web_request_utils =
+                (*uwr_img).class_from_name("UnityEngineInternal", "WebRequestUtils");
+            let unity_web_request =
+                (*uwr_img).class_from_name("UnityEngine.Networking", "UnityWebRequest");
 
-        /*let is_beta = self.exe_name == "Endfield_TBeta_OS.exe";
-        let sig = if is_beta { BETA_BROWSER_LOAD_URL } else { ALPHA_BROWSER_LOAD_URL };
-        let offset = if is_beta { BETA_BROWSER_LOAD_URL_OFFSET } else { ALPHA_BROWSER_LOAD_URL_OFFSET };
-        let browser_load_url = util::pattern_scan_il2cpp(self.assembly_name, sig);
-        if let Some(addr) = browser_load_url {
-            let target_addr = addr as usize + offset;
-            tracing::debug!("browser_load_url: {:x}", target_addr);
-            self.interceptor.attach(
-                target_addr,
-                on_browser_load_url,
-            )?;
-        }
-        else
-        {
-            tracing::warn!("Failed to find browser_load_url");
-        }*/
+            let make_initial_url = (*web_request_utils).get_method("MakeInitialUrl", 2);
+            let internal_set_url = (*unity_web_request).get_method("InternalSetUrl", 1);
+            let set_url = (*unity_web_request).get_method("set_url", 1);
 
+            MAKE_INITIAL_URL = Some(std::mem::transmute::<usize, MakeInitialUrl>(
+                (*make_initial_url).address,
+            ));
+            UWR_INTERNAL_SET_URL = Some(std::mem::transmute::<usize, UwrInternalSetUrl>(
+                (*internal_set_url).address,
+            ));
+
+            self.interceptor
+                .replace((*set_url).address, on_set_url_hook)?;
+        }
         Ok(())
-    }
-
-    unsafe fn de_init(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn get_module_type(&self) -> super::ModuleType {
-        ModuleType::Http
     }
 }
 
-unsafe extern "win64" fn on_make_initial_url(reg: *mut Registers, _: usize) {
-    if (*reg).rcx == 0 {
-        tracing::error!("MakeInitialUrl: rcx is null, skipping");
-        return;
+unsafe extern "win64" fn on_set_url_hook(regs: *mut Registers, _esp: usize, _eip: usize) -> usize {
+    unsafe {
+        let uwr = (*regs).rcx as *mut c_void;
+        let url_string = (*regs).rdx as *mut Il2CppString;
+        on_set_url(uwr, url_string);
     }
+    0
+}
 
-    let str_length = *((*reg).rcx.wrapping_add(16) as *const u32);
-    let str_ptr = (*reg).rcx.wrapping_add(20) as *const u8;
+unsafe fn on_set_url(uwr: *mut c_void, url_string: *mut Il2CppString) {
+    unsafe {
+        let url = (*url_string).to_string();
+        println!("[Http]: {url}");
 
-    if str_length == 0 || str_ptr.is_null() {
-        tracing::warn!("MakeInitialUrl: Invalid string length or pointer, skipping");
-        return;
-    }
-
-    let slice = std::slice::from_raw_parts(str_ptr, (str_length * 2) as usize);
-    let url = match String::from_utf16le(slice) {
-        Ok(url) => url,
-        Err(e) => {
-            tracing::warn!("MakeInitialUrl: UTF-16 conversion failed: {:?}", e);
+        let Some(stripped) = url.strip_prefix("https://") else {
+            UWR_INTERNAL_SET_URL.unwrap_unchecked()(uwr, url_string);
             return;
-        }
-    };
-
-    tracing::debug!("MakeInitialUrl: Original URL: {}", url);
-
-    if !url.contains("/token_by_channel_token") && !url.contains("platform=Windows") && !url.contains("res_version") && !url.contains("asset") && !url.contains("StreamingAssets") {
-        let mut new_url = if url.contains("/remote_config") || url.contains("/get_server_list") {
-            String::from("http://127.0.0.1:21041")
-        } else {
-            String::from("http://127.0.0.1:21000")
         };
 
-        url.split('/').skip(3).for_each(|s| {
-            new_url.push_str("/");
-            new_url.push_str(s);
-        });
+        // This is so fucking dumb but i'll change it later
+        let port = if stripped.contains("/remote_config") || stripped.contains("/get_server_list") {
+            DISPATCH_PORT
+        } else {
+            PORT
+        };
 
-        tracing::debug!("MakeInitialUrl Redirect: {} -> {}", url, new_url);
+        let path = stripped.find('/').map_or("/", |i| &stripped[i..]);
+        let replacement = format!("http://127.0.0.1:{port}{path}\0");
 
-        match CString::new(new_url.as_str()) {
-            Ok(cstring) => (*reg).rcx = marshal::ptr_to_string_ansi(cstring.as_c_str()) as u64,
-            Err(e) => tracing::error!("MakeInitialUrl: Failed to create CString: {:?}", e),
-        }
-    } else {
-        tracing::info!("MakeInitialUrl: Skipping redirection");
-    }
-}
+        println!("[Http] redirect -> {}", replacement.trim_end_matches('\0'));
 
-unsafe extern "win64" fn on_browser_load_url(reg: *mut Registers, _: usize) {
-    if (*reg).rdx == 0 {
-        tracing::error!("Browser::LoadURL: rdx is null, skipping");
-        return;
-    }
+        let new_url = il2cpp::string_new(replacement.as_ptr().cast());
+        let localhost = il2cpp::string_new(c"http://localhost/".as_ptr());
+        let final_url = MAKE_INITIAL_URL.unwrap()(new_url, localhost);
 
-    let str_length = *((*reg).rdx.wrapping_add(16) as *const u32);
-    let str_ptr = (*reg).rdx.wrapping_add(20) as *const u8;
-
-    if str_length == 0 || str_ptr.is_null() {
-        tracing::error!("Browser::LoadURL: Invalid string length or pointer, skipping");
-        return;
-    }
-
-    let slice = std::slice::from_raw_parts(str_ptr, (str_length * 2) as usize);
-    let url = match String::from_utf16le(slice) {
-        Ok(url) => url,
-        Err(e) => {
-            tracing::warn!("Browser::LoadURL: UTF-16 conversion failed: {:?}", e);
-            return;
-        }
-    };
-
-    tracing::debug!("Browser::LoadURL: Original URL: {}", url);
-
-    let mut new_url = String::from("http://127.0.0.1:21000");
-    url.split('/').skip(3).for_each(|s| {
-        new_url.push_str("/");
-        new_url.push_str(s);
-    });
-
-    tracing::debug!("Browser::LoadURL: {} -> {}", url, new_url);
-
-    match CString::new(new_url.as_str()) {
-        Ok(cstring) => (*reg).rdx = marshal::ptr_to_string_ansi(cstring.as_c_str()) as u64,
-        Err(e) => tracing::error!("Browser::LoadURL: Failed to create CString: {:?}", e),
+        UWR_INTERNAL_SET_URL.unwrap_unchecked()(uwr, final_url);
     }
 }

@@ -1,69 +1,79 @@
-use std::collections::HashMap;
-
-use anyhow::Result;
-
 use crate::interceptor::Interceptor;
+use anyhow::Result;
+use std::any::{Any, TypeId};
 
 mod ccp_blocker;
 mod http;
 mod misc;
-mod security;
 
 pub use ccp_blocker::CcpBlocker;
 pub use http::Http;
-pub use misc::Misc;
-/*pub use security::Security;*/
 
-#[derive(Default)]
-pub struct ModuleManager {
-    modules: HashMap<ModuleType, Box<dyn MhyModule>>,
+pub struct Module(Box<dyn HgModule + 'static>);
+
+impl Module {
+    #[inline]
+    pub fn new(mut value: impl HgModule + 'static) -> Self {
+        unsafe { value.init().unwrap() };
+        Self(Box::new(value))
+    }
+
+    #[inline]
+    pub fn deinit(&mut self) {
+        unsafe { self.0.deinit().unwrap() };
+    }
+
+    #[inline]
+    pub fn is<T: Any>(&self) -> bool {
+        (*self.0).type_id() == TypeId::of::<T>()
+    }
 }
+
+pub struct ModuleManager {
+    modules: Vec<Module>,
+}
+
 unsafe impl Sync for ModuleManager {}
 unsafe impl Send for ModuleManager {}
 
 impl ModuleManager {
-    pub unsafe fn enable(&mut self, module: impl MhyModule + 'static) {
-        let mut boxed_module = Box::new(module);
-        boxed_module.init().unwrap();
-        self.modules
-            .insert(boxed_module.get_module_type(), boxed_module);
+    #[inline]
+    pub fn new() -> Self {
+        Self {
+            modules: Vec::with_capacity(8),
+        }
+    }
+
+    pub unsafe fn enable(&mut self, module: impl HgModule + 'static) {
+        self.modules.push(Module::new(module));
     }
 
     #[allow(dead_code)]
-    pub unsafe fn disable(&mut self, module_type: ModuleType) {
-        let module = self.modules.remove(&module_type);
-        if let Some(mut module) = module {
-            module.as_mut().de_init().unwrap();
-        }
+    pub unsafe fn disable<T: HgModule + 'static>(&mut self) {
+        self.modules
+            .iter_mut()
+            .filter(|x| x.is::<T>())
+            .for_each(|x| x.deinit());
     }
 }
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
-pub enum ModuleType {
-    Http,
-    Security,
-    Misc,
-    CcpBlocker,
+pub trait HgModule: Any {
+    unsafe fn init(&mut self) -> Result<()> {
+        Ok(())
+    }
+    unsafe fn deinit(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
-pub trait MhyModule {
-    unsafe fn init(&mut self) -> Result<()>;
-    unsafe fn de_init(&mut self) -> Result<()>;
-    fn get_module_type(&self) -> ModuleType;
-}
-
-pub struct MhyContext<T> {
-    pub assembly_name: &'static str,
-    pub exe_name: String,
+pub struct HgContext<T> {
     pub interceptor: Interceptor,
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<T> MhyContext<T> {
-    pub fn new(assembly_name: &'static str, exe_name: String) -> Self {
+impl<T> HgContext<T> {
+    pub const fn new() -> Self {
         Self {
-            assembly_name,
-            exe_name,
             interceptor: Interceptor::new(),
             _phantom: std::marker::PhantomData,
         }
